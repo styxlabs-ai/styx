@@ -1,55 +1,50 @@
-# Styx
-
-**Compliance infrastructure for tokenized real estate.**
-
+Styx
+Compliance infrastructure for tokenized real estate.
 Every property deal — human or AI agent — must cross through compliance before closing. Styx automates that crossing.
 
----
+What It Does
+Styx is a compliance API and on-chain attestation network built for real estate transactions. Deal data goes in. Verified compliance results come out. No PII stored on-chain.
+Styx runs the checks that every closing requires — sanctions screening, identity verification, federal filing determinations, and jurisdiction-specific rules — and issues verifiable on-chain attestations that any platform, protocol, or agent can consume.
 
-## What It Does
+Verticals
 
-Styx is a stateless compliance API. Platforms and AI agents send deal data, Styx runs checks against federal regulations and 50-state rules, and returns a compliance result. No PII stored.
+Title & Settlement
+Automate compliance workflows that title companies run manually today — FinCEN RRE filing, FIRPTA withholding, OFAC screening, and disclosure validation.
 
-- Sanctions screening
-- Jurisdiction compliance (all 50 states + DC)
-- FinCEN RRE determination and filing
-- Legal, brokerage, and lending compliance
-- KYC / identity verification
-- FIRPTA withholding
-- ERC-3643 claim issuance
-- Deal pipeline orchestration
+Tokenization Platforms
+Embed compliant identity and regulatory checks directly into tokenized asset issuance and transfer flows.
 
-## Payment
+AI Agents
+Autonomous agents pay per request in USDC and receive a compliance result. No accounts, no API keys, no human in the loop.
 
+Proptech & Closing Platforms
+Drop compliance into any transaction workflow via API. Works with existing tech stacks.
+
+Brokerage & Lending
+Automate counterparty screening, jurisdiction checks, and regulatory determinations across residential and commercial deal pipelines.
+
+Legal & Escrow
+Structured compliance outputs for attorneys and escrow officers — audit-ready, timestamped, and verifiable.
+
+Integrations
+Styx is built on leading compliance and identity infrastructure, including Chainlink's Automated Compliance Engine (ACE) and GLEIF's verifiable Legal Entity Identifier (vLEI) standard.
+
+Payment
 Two authentication modes:
 
-- **[x402](https://x402.org)** — Pay-per-request in USDC on Base. No accounts, no API keys. AI agents pay and get a compliance result.
-- **API keys** — For enterprise integrations with volume pricing.
+x402 — Pay-per-request in USDC on Base. Designed for AI agents and programmatic access.
+API Keys — Enterprise integrations with volume pricing.
 
-## Who This Is For
 
-- **Tokenization platforms** — plug compliance into your closing flow
-- **Title companies** — automate FinCEN filing, jurisdiction checks, and disclosure validation
-- **AI agents** — autonomously pay for and consume compliance checks
-- **Proptech builders** — embed compliance into any real estate transaction workflow
+Status
+Private pilot. API docs and integration guides available to partners under NDA.
 
-## Status
+Get In Touch
 
-Private pilot. API docs and integration guides are available to partners under NDA.
+Website: styxsys.com
+Twitter: @styxsys
+Email: hello@styxsys.com
 
-## Get In Touch
 
-- **Website:** [styxsys.com](https://styxsys.com)
-- **Twitter:** [@styxsys](https://x.com/styxsys)
-- **Email:** hello@styxsys.com
-
-## License
-
+License
 MIT
-
----
-
-<p align="center">
-  <em>Every deal must cross the river.</em><br>
-  <strong>Styx Systems LLC</strong> · Wyoming · 2026
-</p>
