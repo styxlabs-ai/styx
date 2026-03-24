@@ -1,0 +1,1925 @@
+openapi: 3.1.0
+info:
+  title: Styx Compliance API
+  version: 1.2.0
+  description: |
+    Compliance infrastructure for tokenized real estate. Every property deal
+    must cross through compliance before closing. AI agents pay via x402
+    micropayments in USDC on Base.
+
+    **Payment Protocol**: x402 (HTTP-native). All paid endpoints return 402
+    with a `PAYMENT-REQUIRED` header containing payment options. Sign an
+    EIP-712 authorization, attach it to the retry request, and the facilitator
+    settles the USDC transfer on-chain.
+
+    **API Key Auth**: Enterprise partners can authenticate with an `X-API-Key`
+    header instead of x402 payments. Sandbox keys (`styx_test_*`) are available
+    via the developer portal.
+
+    **MCP Server**: An MCP-compatible server is available for AI agent
+    frameworks that support the Model Context Protocol.
+
+    **Pricing**: Call `GET /api/v1/pricing` for current rates. Prices are
+    denominated in USDC.
+
+    **Validation**: All paid endpoints validate requests with Zod schemas.
+    Invalid requests return 400 with structured per-field errors:
+    `{ "error": "Validation failed", "details": { "field": ["message"] } }`.
+    State codes are auto-uppercased. Ethereum addresses must be `0x` + 40 hex chars.
+    Enum fields are strictly enforced.
+  contact:
+    name: Styx Systems LLC
+    email: hello@styxsys.com
+    url: https://styxsys.com
+  license:
+    name: BSL 1.1
+    url: https://github.com/styxlabs-ai/styx/blob/main/LICENSE
+
+servers:
+  - url: http://localhost:3402
+    description: Local development
+  - url: https://api.styxsys.com
+    description: Production (coming soon)
+
+tags:
+  - name: Discovery
+    description: Free endpoints for health and pricing
+  - name: Sanctions
+    description: OFAC sanctions screening via Chainalysis
+  - name: Compliance
+    description: Jurisdiction-specific compliance checks
+  - name: FinCEN RRE
+    description: FinCEN Real Estate Reporting (CTR/SAR)
+  - name: Legal
+    description: Legal compliance (docs, attorneys, UPL, closing)
+  - name: Brokerage
+    description: Brokerage compliance (licenses, agency, disclosures)
+  - name: Lending
+    description: Lending prequalification and program matching
+  - name: Deal Pipeline
+    description: 7-stage autonomous deal orchestration
+  - name: History
+    description: Compliance history lookups
+  - name: KYC
+    description: KYC risk assessment and full party checks (FCRA-safe)
+  - name: FIRPTA
+    description: Foreign Investment in Real Property Tax Act withholding
+  - name: ERC-3643
+    description: On-chain compliance claims for tokenized securities (ONCHAINID)
+  - name: Attestations
+    description: Property compliance attestation explorer
+  - name: Onboarding
+    description: Partner onboarding (invite-gated, free)
+  - name: Stubs
+    description: Placeholder endpoints (integration pending)
+
+paths:
+  /api/v1/health:
+    get:
+      tags: [Discovery]
+      summary: Health check
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service: { type: string, example: styx-compliance-api }
+                  status: { type: string, example: healthy }
+                  version: { type: string, example: 1.0.0 }
+                  network: { type: string, example: 'eip155:84532' }
+                  chainId: { type: integer, example: 84532 }
+                  paymentProtocol: { type: string, example: x402 }
+                  receiver: { type: string, example: '0x5EdB7bD2ad14a7A2a41ff49e3D714C0D5Ec1e190' }
+
+  /api/v1/pricing:
+    get:
+      tags: [Discovery]
+      summary: Pricing discovery
+      operationId: getPricing
+      description: Returns current USDC prices for all paid endpoints.
+      responses:
+        '200':
+          description: Pricing information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  protocol: { type: string }
+                  currency: { type: string }
+                  network: { type: string }
+                  chainId: { type: integer }
+                  receiver: { type: string }
+                  endpoints:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        price: { type: string }
+                        description: { type: string }
+                  humanTiers:
+                    type: object
+                    properties:
+                      perDeal: { type: string }
+                      enterpriseMonthly: { type: string }
+                      enterpriseAnnual: { type: string }
+
+  /api/v1/sanctions-screening:
+    post:
+      tags: [Sanctions]
+      summary: OFAC sanctions screening
+      operationId: screenSanctions
+      description: Screens buyer and seller wallet addresses against Chainalysis Oracle + OFAC SDN name list.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [buyerAddress, sellerAddress]
+              properties:
+                dealId: { type: string }
+                buyerAddress: { type: string, pattern: '^0x[a-fA-F0-9]{40}$', description: Buyer Ethereum wallet address }
+                sellerAddress: { type: string, pattern: '^0x[a-fA-F0-9]{40}$', description: Seller Ethereum wallet address }
+      responses:
+        '200':
+          description: Screening results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SanctionsResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/compliance-check:
+    post:
+      tags: [Compliance]
+      summary: Single jurisdiction compliance check
+      operationId: checkCompliance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                dealId: { type: string }
+                state: { type: string, minLength: 2, maxLength: 2, description: 'Two-letter state code (auto-uppercased)', example: NY }
+                propertyType: { type: string, enum: [residential, commercial, mixed-use, land] }
+                purchasePrice: { type: number }
+                buyerAddress: { type: string }
+                sellerAddress: { type: string }
+                buyerIsEntity: { type: boolean }
+                sellerIsEntity: { type: boolean }
+                buyerIsForeign: { type: boolean }
+                sellerIsForeign: { type: boolean }
+                propertyAddress: { type: string }
+                city: { type: string }
+                county: { type: string }
+                zipCode: { type: string }
+                financingType: { type: string, enum: [cash, conventional, fha, va, commercial] }
+                closingDate: { type: string, format: date }
+      responses:
+        '200':
+          description: Compliance result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/compliance-check-commercial:
+    post:
+      tags: [Compliance]
+      summary: Commercial property compliance check
+      operationId: checkComplianceCommercial
+      description: Requires propertyType "commercial" or "mixed-use".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                dealId: { type: string }
+                state: { type: string }
+                propertyType: { type: string, enum: [commercial, mixed-use] }
+                purchasePrice: { type: number }
+                buyerAddress: { type: string }
+                sellerAddress: { type: string }
+                buyerIsEntity: { type: boolean }
+                sellerIsEntity: { type: boolean }
+                squareFootage: { type: number }
+                zoning: { type: string }
+      responses:
+        '200':
+          description: Commercial compliance result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/compliance-check-high-value:
+    post:
+      tags: [Compliance]
+      summary: High-value property compliance check (>$5M)
+      operationId: checkComplianceHighValue
+      description: Requires purchasePrice > $5,000,000.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state, purchasePrice]
+              properties:
+                dealId: { type: string }
+                state: { type: string }
+                purchasePrice: { type: number, exclusiveMinimum: 5000000, description: 'Must be > $5,000,000' }
+                propertyType: { type: string }
+                buyerAddress: { type: string }
+                sellerAddress: { type: string }
+                buyerIsEntity: { type: boolean }
+                sellerIsEntity: { type: boolean }
+      responses:
+        '200':
+          description: High-value compliance result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplianceResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/full-compliance:
+    post:
+      tags: [Compliance]
+      summary: Full compliance package (sanctions + jurisdiction)
+      operationId: fullCompliance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state, buyerAddress, sellerAddress]
+              properties:
+                dealId: { type: string }
+                state: { type: string, minLength: 2, maxLength: 2, description: 'Two-letter state code (auto-uppercased)' }
+                buyerAddress: { type: string, pattern: '^0x[a-fA-F0-9]{40}$' }
+                sellerAddress: { type: string, pattern: '^0x[a-fA-F0-9]{40}$' }
+                propertyAddress: { type: string }
+                propertyType: { type: string }
+                purchasePrice: { type: number }
+                buyerIsEntity: { type: boolean }
+                sellerIsEntity: { type: boolean }
+                buyerIsForeign: { type: boolean }
+                sellerIsForeign: { type: boolean }
+                financingType: { type: string }
+                closingDate: { type: string, format: date }
+      responses:
+        '200':
+          description: Full compliance result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ComplianceResult'
+                  - type: object
+                    properties:
+                      checksCount: { type: integer }
+                      checksPassed: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/legal/check:
+    post:
+      tags: [Legal]
+      summary: Legal compliance check
+      operationId: checkLegal
+      description: Checks document requirements, attorney obligations, UPL risks, closing standards, recording requirements, and signature validity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                dealId: { type: string }
+                state: { type: string }
+                purchasePrice: { type: number }
+                closingDate: { type: string, format: date }
+                propertyAddress: { type: string }
+                propertyType: { type: string }
+                isFinanced: { type: boolean }
+                attorneys: { type: array, items: { type: object } }
+                providedDocuments: { type: array, items: { type: string } }
+                deedType: { type: string }
+                signatureMethod: { type: string }
+                isTokenizedTransaction: { type: boolean }
+                usingSmartContractExecution: { type: boolean }
+                usingPowerOfAttorney: { type: boolean }
+      responses:
+        '200':
+          description: Legal compliance result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegalResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/brokerage/check:
+    post:
+      tags: [Brokerage]
+      summary: Brokerage compliance check
+      operationId: checkBrokerage
+      description: Checks licensing, agency relationships, disclosures, commissions, and fair housing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state, agents, agencyRelationship, commission]
+              properties:
+                dealId: { type: string }
+                state: { type: string, minLength: 2, maxLength: 2, description: 'Two-letter state code (auto-uppercased)' }
+                purchasePrice: { type: number }
+                agents:
+                  type: array
+                  minItems: 1
+                  description: At least one agent required
+                  items:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      licenseNumber: { type: string }
+                      licenseState: { type: string }
+                      role: { type: string }
+                agencyRelationship:
+                  type: object
+                  properties:
+                    type: { type: string, enum: [exclusive_buyer, exclusive_seller, dual_agency, designated_agency, transaction_broker] }
+                commission:
+                  type: object
+                  properties:
+                    totalRate: { type: number }
+                    buyerAgentRate: { type: number }
+                    sellerAgentRate: { type: number }
+                providedDisclosures: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: Brokerage compliance result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrokerageResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/lending/prequalify:
+    post:
+      tags: [Lending]
+      summary: Lending prequalification
+      operationId: prequalifyLending
+      description: Prequalifies a borrower and matches eligible loan programs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [borrower, property, requestedLoanAmount]
+              properties:
+                borrower:
+                  type: object
+                  properties:
+                    borrowerId: { type: string }
+                    creditScore: { type: integer }
+                    annualIncome: { type: number }
+                    monthlyDebts: { type: number }
+                    employmentType: { type: string }
+                    isVeteran: { type: boolean }
+                    isFirstTimeBuyer: { type: boolean }
+                property:
+                  type: object
+                  properties:
+                    state: { type: string }
+                    propertyType: { type: string }
+                    purchasePrice: { type: number }
+                    address: { type: string }
+                requestedLoanAmount: { type: number, exclusiveMinimum: 0, description: Must be positive }
+      responses:
+        '200':
+          description: Prequalification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LendingResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/fincen-rre/determine:
+    post:
+      tags: [FinCEN RRE]
+      summary: FinCEN RRE filing determination
+      operationId: determineFinCEN
+      description: Determines whether a FinCEN RRE filing is required (cash + entity + residential).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state, propertyType, financingType]
+              properties:
+                dealId: { type: string }
+                state: { type: string, minLength: 2, maxLength: 2, description: 'Two-letter state code (auto-uppercased)' }
+                propertyType: { type: string, enum: [residential, commercial, mixed-use, land] }
+                financingType: { type: string, enum: [cash, conventional, fha, va, commercial] }
+                buyerIsEntity: { type: boolean }
+                buyerIsTrust: { type: boolean }
+                closingDate: { type: string, format: date }
+      responses:
+        '200':
+          description: Filing determination
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinCENDetermination'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/fincen-rre/report:
+    post:
+      tags: [FinCEN RRE]
+      summary: Generate FinCEN RRE report
+      operationId: generateFinCENReport
+      description: Generates a BSA XML 2.0 report with beneficial ownership data. Returns masked version (PII redacted).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinCENReportInput'
+      responses:
+        '200':
+          description: Masked report
+          content:
+            application/json:
+              schema:
+                type: object
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/fincen-rre/file:
+    post:
+      tags: [FinCEN RRE]
+      summary: File FinCEN RRE report via SFTP
+      operationId: fileFinCEN
+      description: Generates BSA XML and uploads via SDTM SFTP channel. Returns 503 if SFTP not configured.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinCENReportInput'
+      responses:
+        '200':
+          description: Filing result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report: { type: object, description: Masked report }
+                  filing:
+                    type: object
+                    properties:
+                      success: { type: boolean }
+                      bsaTrackingId: { type: string }
+                      status: { type: string }
+                      submittedAt: { type: string, format: date-time }
+                      errors: { type: array, items: { type: string } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+        '422':
+          description: Report validation failed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  validationErrors: { type: array, items: { type: string } }
+        '503':
+          description: SFTP filing not configured
+
+  /api/v1/fincen-rre/status:
+    post:
+      tags: [FinCEN RRE]
+      summary: Check FinCEN filing status
+      operationId: checkFinCENStatus
+      description: Checks SDTM acknowledgment directory for filing status. Returns 503 if SFTP not configured.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bsaTrackingId]
+              properties:
+                bsaTrackingId: { type: string }
+      responses:
+        '200':
+          description: Filing status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [filed, accepted, rejected] }
+                  errors: { type: array, items: { type: string } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+        '503':
+          description: SFTP filing not configured
+
+  /api/v1/deal/create:
+    post:
+      tags: [Deal Pipeline]
+      summary: Create a new deal
+      operationId: createDeal
+      description: Registers buyer/seller agents and creates a deal in the 7-stage pipeline.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [buyerWallet, sellerWallet, property, terms]
+              properties:
+                buyerWallet: { type: string, description: Buyer wallet address }
+                sellerWallet: { type: string, description: Seller wallet address }
+                property:
+                  type: object
+                  required: [state]
+                  properties:
+                    address: { type: string }
+                    city: { type: string }
+                    state: { type: string }
+                    zipCode: { type: string }
+                    county: { type: string }
+                    propertyType: { type: string, enum: [residential, commercial, mixed-use, land] }
+                    parcelNumber: { type: string }
+                terms:
+                  type: object
+                  properties:
+                    purchasePrice: { type: number }
+                    earnestMoney: { type: number }
+                    closingDate: { type: string, format: date }
+                    financingType: { type: string, enum: [cash, conventional, fha, va, commercial] }
+                    inspectionPeriodDays: { type: integer }
+      responses:
+        '200':
+          description: Deal created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DealSummary'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/deal/advance:
+    post:
+      tags: [Deal Pipeline]
+      summary: Advance deal to next stage
+      operationId: advanceDeal
+      description: |
+        Runs all handlers for the current stage and transitions to the next.
+        Stages: INITIATED -> NEGOTIATING -> COMPLIANCE_REVIEW -> TITLE_VERIFICATION -> ESCROW_LOCKED -> DOCUMENT_EXECUTION -> SETTLED
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dealId]
+              properties:
+                dealId: { type: string }
+      responses:
+        '200':
+          description: Stage advanced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DealAdvanceResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+        '409':
+          description: Deal in terminal stage or terms not agreed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  stage: { type: string }
+
+  /api/v1/deal/close:
+    post:
+      tags: [Deal Pipeline]
+      summary: Execute atomic settlement
+      operationId: closeDeal
+      description: Executes escrow disbursement, deed recording, and compliance audit atomically. Deal must be in SETTLED stage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dealId]
+              properties:
+                dealId: { type: string }
+      responses:
+        '200':
+          description: Settlement executed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dealId: { type: string }
+                  stage: { type: string }
+                  settlement:
+                    $ref: '#/components/schemas/SettlementRecord'
+                  timestamp: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+        '409':
+          description: Deal not in SETTLED stage
+
+  /api/v1/history/wallet:
+    post:
+      tags: [History]
+      summary: Wallet compliance history
+      operationId: getWalletHistory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [walletAddress]
+              properties:
+                walletAddress: { type: string }
+      responses:
+        '200':
+          description: Wallet history
+          content:
+            application/json:
+              schema:
+                type: object
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/history/property:
+    post:
+      tags: [History]
+      summary: Property compliance history
+      operationId: getPropertyHistory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [propertyAddress, state]
+              properties:
+                propertyAddress: { type: string }
+                state: { type: string }
+      responses:
+        '200':
+          description: Property history
+          content:
+            application/json:
+              schema:
+                type: object
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/history/entity:
+    post:
+      tags: [History]
+      summary: Entity compliance history
+      operationId: getEntityHistory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entityIdentifier]
+              properties:
+                entityIdentifier: { type: string }
+      responses:
+        '200':
+          description: Entity history
+          content:
+            application/json:
+              schema:
+                type: object
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/deal-audit:
+    post:
+      tags: [Deal Pipeline]
+      summary: Deal lifecycle audit
+      operationId: auditDeal
+      description: |
+        Full lifecycle audit for a deal. Queries both the in-memory orchestrator
+        (rich, ephemeral) and Neon DB (durable). Returns 404 if the deal is not
+        found in either source.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dealId]
+              properties:
+                dealId: { type: string }
+                stages:
+                  type: array
+                  items: { type: string }
+                  description: Filter to specific stages (defaults to all 7)
+      responses:
+        '200':
+          description: Audit result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DealAuditResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+        '404':
+          description: Deal not found in memory or database
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string, example: Deal not found }
+                  dealId: { type: string }
+
+  /api/v1/kyc/risk-assessment:
+    post:
+      tags: [KYC]
+      summary: KYC transaction risk assessment
+      operationId: kycRiskAssessment
+      description: FCRA-safe risk assessment across all deal parties. Evaluates transaction patterns, entity structures, PEP exposure, and beneficial ownership complexity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KYCRiskAssessmentInput'
+      responses:
+        '200':
+          description: Risk assessment result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KYCRiskAssessmentResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/kyc/check:
+    post:
+      tags: [KYC]
+      summary: Full KYC check
+      operationId: kycFullCheck
+      description: Runs selected KYC checks — risk assessment, CDD determination, identity completeness, beneficial ownership validation, document requirements, and credential readiness.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KYCFullCheckInput'
+      responses:
+        '200':
+          description: Full KYC check result
+          content:
+            application/json:
+              schema:
+                type: object
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/firpta/determine:
+    post:
+      tags: [FIRPTA]
+      summary: FIRPTA withholding determination
+      operationId: firptaDetermine
+      description: Determines FIRPTA withholding obligations based on seller foreign status, property type, buyer intent, and available exemptions (non-foreign affidavit, withholding certificate, 1031 exchange, QIE).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FIRPTADeterminationInput'
+      responses:
+        '200':
+          description: FIRPTA determination result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FIRPTADeterminationResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/firpta/calculate:
+    post:
+      tags: [FIRPTA]
+      summary: Full FIRPTA calculation
+      operationId: firptaCalculate
+      description: Full FIRPTA calculation including federal and state withholding amounts, required forms, compliance checklist, and penalty exposure.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FIRPTACalculationInput'
+      responses:
+        '200':
+          description: FIRPTA calculation result
+          content:
+            application/json:
+              schema:
+                type: object
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/erc3643/issue-claims:
+    post:
+      tags: [ERC-3643]
+      summary: Issue ERC-3643 compliance claims
+      operationId: issueClaims
+      description: Issues signed ERC-3643 compliance claims for an ONCHAINID identity contract. Claims attest to compliance checks (sanctions, KYC, jurisdiction) completed by Styx. Requires CLAIM_ISSUER_PRIVATE_KEY.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimIssuanceInput'
+      responses:
+        '200':
+          description: Issued claims
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimIssuanceResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+        '503':
+          description: Claim issuer not configured (CLAIM_ISSUER_PRIVATE_KEY missing)
+
+  /api/v1/erc3643/verify-claim:
+    post:
+      tags: [ERC-3643]
+      summary: Verify an ERC-3643 claim
+      operationId: verifyClaim
+      description: Off-chain verification of an ERC-3643 claim signature. Confirms the claim was signed by the Styx claim issuer key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimVerifyInput'
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                  issuer: { type: string, description: Ethereum address of the claim issuer }
+                  topic: { type: integer }
+                  recoveredSigner: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+        '503':
+          description: Claim issuer not configured
+
+  /api/v1/attestations/explorer:
+    post:
+      tags: [Attestations]
+      summary: Property attestation explorer
+      operationId: exploreAttestations
+      description: Queries compliance checks, sanctions screenings, and on-chain claims associated with a property, city, or deal. At least one of propertyAddress, city, or dealId is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttestationExplorerInput'
+      responses:
+        '200':
+          description: Attestation records
+          content:
+            application/json:
+              schema:
+                type: object
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/openapi:
+    get:
+      tags: [Discovery]
+      summary: OpenAPI specification
+      operationId: getOpenApiSpec
+      description: Returns this OpenAPI 3.1 specification as YAML. Free, no authentication required.
+      responses:
+        '200':
+          description: OpenAPI YAML spec
+          content:
+            text/yaml:
+              schema:
+                type: string
+        '404':
+          description: Spec file not found
+
+  /api/v1/onboard/validate-token:
+    get:
+      tags: [Onboarding]
+      summary: Validate invite token
+      operationId: validateInviteToken
+      description: Checks whether an invite token is valid. Called by onboarding forms on page load. Free, no authentication required.
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Invite token string
+      responses:
+        '200':
+          description: Token validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                  email: { type: string, description: 'Present when valid=true' }
+                  vertical: { type: string, description: 'Present when valid=true', enum: [title, lending, brokerage] }
+                  reason: { type: string, description: 'Present when valid=false', enum: [not_found, expired, already_used] }
+
+  /api/v1/onboard/title:
+    post:
+      tags: [Onboarding]
+      summary: Title company onboarding
+      operationId: onboardTitle
+      description: Submit title company onboarding application. Requires a valid invite token. Free, invite-gated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TitleOnboardingInput'
+      responses:
+        '201':
+          description: Onboarding submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: Invalid or expired invite token
+        '409':
+          description: Partner with this EIN already exists
+
+  /api/v1/onboard/lending:
+    post:
+      tags: [Onboarding]
+      summary: Lending company onboarding
+      operationId: onboardLending
+      description: Submit lending company onboarding application. Requires a valid invite token. Free, invite-gated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LendingOnboardingInput'
+      responses:
+        '201':
+          description: Onboarding submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: Invalid or expired invite token
+        '409':
+          description: Partner with this EIN already exists
+
+  /api/v1/onboard/brokerage:
+    post:
+      tags: [Onboarding]
+      summary: Brokerage company onboarding
+      operationId: onboardBrokerage
+      description: Submit brokerage company onboarding application. Requires a valid invite token. Free, invite-gated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrokerageOnboardingInput'
+      responses:
+        '201':
+          description: Onboarding submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: Invalid or expired invite token
+        '409':
+          description: Partner with this EIN already exists
+
+  /api/v1/title-verification:
+    post:
+      tags: [Stubs]
+      summary: Title search and lien verification
+      operationId: verifyTitle
+      description: Stub — requires Balcony API integration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [propertyAddress, state]
+              properties:
+                dealId: { type: string }
+                propertyAddress: { type: string }
+                state: { type: string }
+                county: { type: string }
+      responses:
+        '200':
+          description: Title report
+          content:
+            application/json:
+              schema:
+                type: object
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+  /api/v1/document-generation:
+    post:
+      tags: [Stubs]
+      summary: Jurisdiction-specific document generation
+      operationId: generateDocument
+      description: Stub — document generation coming soon.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state, documentType]
+              properties:
+                dealId: { type: string }
+                state: { type: string }
+                documentType: { type: string }
+      responses:
+        '200':
+          description: Generated document
+          content:
+            application/json:
+              schema:
+                type: object
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '402': { $ref: '#/components/responses/PaymentRequired' }
+
+components:
+  responses:
+    BadRequest:
+      description: |
+        Request validation failed. Returns structured per-field errors from Zod schema validation.
+        All state codes must be exactly 2 characters (auto-uppercased). Ethereum addresses must
+        match `0x` + 40 hex characters. Enums are strictly enforced.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, details]
+            properties:
+              error:
+                type: string
+                example: Validation failed
+              details:
+                type: object
+                description: Per-field error messages keyed by field name
+                additionalProperties:
+                  type: array
+                  items: { type: string }
+                example:
+                  buyerAddress: ['Must be a valid Ethereum address (0x + 40 hex chars)']
+                  state: ['String must contain at least 2 character(s)']
+
+    PaymentRequired:
+      description: x402 payment required
+      headers:
+        PAYMENT-REQUIRED:
+          description: Base64-encoded payment options (scheme, network, amount, payTo)
+          schema:
+            type: string
+
+  schemas:
+    SanctionsResult:
+      type: object
+      properties:
+        dealId: { type: string }
+        timestamp: { type: string, format: date-time }
+        chainId: { type: integer }
+        oracleAddress: { type: string }
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              address: { type: string }
+              role: { type: string }
+              sanctioned: { type: boolean }
+              source: { type: string }
+        overallCleared: { type: boolean }
+        sanctionedCount: { type: integer }
+
+    ComplianceResult:
+      type: object
+      properties:
+        dealId: { type: string }
+        jurisdiction: { type: string }
+        timestamp: { type: string, format: date-time }
+        overallStatus:
+          type: string
+          enum: [approved, rejected, pending_review]
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              ruleId: { type: string }
+              ruleName: { type: string }
+              jurisdiction: { type: string }
+              required: { type: boolean }
+              passed: { type: boolean }
+              details: { type: string }
+        sanctionsScreening:
+          type: object
+          properties:
+            buyerCleared: { type: boolean }
+            sellerCleared: { type: boolean }
+            entityCleared: { type: boolean }
+            screenedAt: { type: integer }
+            source: { type: string }
+
+    LegalResult:
+      type: object
+      properties:
+        dealId: { type: string }
+        state: { type: string }
+        timestamp: { type: integer }
+        overallPassed: { type: boolean }
+        documentCheck:
+          type: object
+          properties:
+            complete: { type: boolean }
+            required: { type: array, items: { type: object } }
+            missing: { type: array, items: { type: object } }
+        attorneyCheck:
+          type: object
+          properties:
+            required: { type: boolean }
+            valid: { type: boolean }
+            issues: { type: array, items: { type: string } }
+        uplCheck:
+          type: object
+          properties:
+            risksDetected: { type: boolean }
+            risks: { type: array, items: { type: object } }
+        closingStandardsCheck:
+          type: object
+          properties:
+            compliant: { type: boolean }
+            issues: { type: array, items: { type: string } }
+        recordingCheck:
+          type: object
+          properties:
+            compliant: { type: boolean }
+            eRecordingAvailable: { type: boolean }
+            digitalDeedAccepted: { type: boolean }
+        signatureCheck:
+          type: object
+          properties:
+            valid: { type: boolean }
+            blockchainSignatureAccepted: { type: boolean }
+            ronAccepted: { type: boolean }
+        requiredActions:
+          type: array
+          items: { type: string }
+
+    BrokerageResult:
+      type: object
+      properties:
+        dealId: { type: string }
+        state: { type: string }
+        timestamp: { type: integer }
+        overallPassed: { type: boolean }
+        licenseChecks:
+          type: array
+          items:
+            type: object
+            properties:
+              agent: { type: string }
+              valid: { type: boolean }
+              issues: { type: array, items: { type: string } }
+        agencyChecks:
+          type: object
+          properties:
+            compliant: { type: boolean }
+            issues: { type: array, items: { type: string } }
+        disclosureChecks:
+          type: object
+          properties:
+            complete: { type: boolean }
+            missing: { type: array, items: { type: object } }
+        commissionChecks:
+          type: object
+          properties:
+            compliant: { type: boolean }
+            issues: { type: array, items: { type: string } }
+        fairHousingFlags:
+          type: array
+          items:
+            type: object
+            properties:
+              ruleId: { type: string }
+              description: { type: string }
+              severity: { type: string, enum: [blocker, warning, info] }
+        requiredActions:
+          type: array
+          items: { type: string }
+
+    LendingResult:
+      type: object
+      properties:
+        requestId: { type: string }
+        borrowerId: { type: string }
+        timestamp: { type: integer }
+        qualified: { type: boolean }
+        maxLoanAmount: { type: number }
+        maxPurchasePrice: { type: number }
+        estimatedMonthlyPayment: { type: number }
+        frontEndDTI: { type: number }
+        backEndDTI: { type: number }
+        dtiStatus: { type: string, enum: [excellent, good, marginal, over_limit] }
+        creditTier: { type: string, enum: [prime, near_prime, subprime, deep_subprime] }
+        eligibleProgramTypes:
+          type: array
+          items: { type: string, enum: [conventional, fha, va, usda, jumbo, construction, non_qm_dscr, non_qm_bank_statement] }
+        topRecommendation: { type: string }
+        warnings: { type: array, items: { type: string } }
+        blockers: { type: array, items: { type: string } }
+
+    FinCENDetermination:
+      type: object
+      properties:
+        dealId: { type: string }
+        filingRequired: { type: boolean }
+        triggers:
+          type: object
+          properties:
+            isCashTransaction: { type: boolean }
+            isResidentialProperty: { type: boolean }
+            transfereeIsEntityOrTrust: { type: boolean }
+        reasons: { type: array, items: { type: string } }
+        filingDeadline: { type: string, format: date }
+        ruleVersion: { type: string }
+
+    FinCENReportInput:
+      type: object
+      required: [dealId, closingDate, reportingPerson, transferee, transferor, property, consideration]
+      properties:
+        dealId: { type: string }
+        closingDate: { type: string, format: date }
+        reportingPerson: { type: object }
+        transferee: { type: object }
+        transferor: { type: object }
+        property: { type: object }
+        consideration: { type: object }
+
+    DealSummary:
+      type: object
+      properties:
+        dealId: { type: string }
+        stage:
+          type: string
+          enum: [INITIATED, NEGOTIATING, COMPLIANCE_REVIEW, TITLE_VERIFICATION, ESCROW_LOCKED, DOCUMENT_EXECUTION, SETTLED, FAILED, CANCELLED]
+        property:
+          type: object
+          properties:
+            address: { type: string }
+            city: { type: string }
+            state: { type: string }
+            propertyType: { type: string }
+        terms:
+          type: object
+          properties:
+            purchasePrice: { type: number }
+            closingDate: { type: string }
+            financingType: { type: string }
+        agents:
+          type: object
+          properties:
+            buyer: { type: string }
+            seller: { type: string }
+            compliance: { type: string }
+            title: { type: string }
+            escrow: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    DealAdvanceResult:
+      type: object
+      properties:
+        dealId: { type: string }
+        previousStage: { type: string }
+        currentStage: { type: string }
+        timestamp: { type: string, format: date-time }
+        compliance:
+          type: object
+          properties:
+            overallStatus: { type: string }
+        titleReport:
+          type: object
+          properties:
+            titleStatus: { type: string }
+        escrow:
+          type: object
+          properties:
+            status: { type: string }
+        documentsExecuted: { type: integer }
+        documentsTotal: { type: integer }
+
+    SettlementRecord:
+      type: object
+      properties:
+        dealId: { type: string }
+        closedAt: { type: integer }
+        finalPrice: { type: number }
+        deedTxHash: { type: string }
+        escrowDisbursementTxHash: { type: string }
+        complianceAuditTxHash: { type: string }
+        documents: { type: array, items: { type: string } }
+        parties:
+          type: object
+          properties:
+            buyer: { type: string }
+            seller: { type: string }
+            titleAgent: { type: string }
+            complianceAgent: { type: string }
+            escrowAgent: { type: string }
+
+    DealAuditResult:
+      type: object
+      required: [dealId, timestamp, auditType, deal, stageHistory, complianceChecks, sanctionsScreenings, auditEvents, onChainRecords, stagesAudited, status]
+      properties:
+        dealId: { type: string }
+        timestamp: { type: string, format: date-time }
+        auditType: { type: string, example: full_lifecycle }
+        deal:
+          type: object
+          properties:
+            propertyState: { type: string, nullable: true, example: NY }
+            propertyType:
+              type: string
+              nullable: true
+              enum: [residential, commercial, mixed-use, land]
+            purchasePrice: { type: string, nullable: true, example: '500000' }
+            stage:
+              type: string
+              nullable: true
+              enum: [INITIATED, NEGOTIATING, COMPLIANCE_REVIEW, TITLE_VERIFICATION, ESCROW_LOCKED, DOCUMENT_EXECUTION, SETTLED, FAILED, CANCELLED]
+            complianceStatus:
+              type: string
+              enum: [pending, approved, rejected, pending_review]
+            fincenFilingStatus:
+              type: string
+              enum: [not_required, pending_determination, required_unfiled, filed, late]
+            initiatedAt: { type: string, format: date-time, nullable: true }
+            settledAt: { type: string, format: date-time, nullable: true }
+        stageHistory:
+          type: array
+          items:
+            type: object
+            properties:
+              fromStage: { type: string }
+              toStage: { type: string }
+              reason: { type: string, nullable: true }
+              txHash: { type: string, nullable: true }
+              createdAt: { type: string, format: date-time }
+        complianceChecks:
+          type: array
+          items:
+            type: object
+            properties:
+              checkType:
+                type: string
+                enum: [sanctions_wallet, sanctions_name, jurisdiction, firpta, boi_reporting, accredited_investor, fincen_rre, title, lending, brokerage, legal]
+              passed: { type: boolean }
+              jurisdiction: { type: string, nullable: true }
+              ruleVersion: { type: string, nullable: true }
+              detail: { type: object, nullable: true }
+              executedAt: { type: string, format: date-time }
+        sanctionsScreenings:
+          type: array
+          items:
+            type: object
+            properties:
+              source:
+                type: string
+                enum: [chainalysis, ofac_sdn, complyadvantage]
+              cleared: { type: boolean }
+              matchCount: { type: integer }
+              screenedAt: { type: string, format: date-time }
+        auditEvents:
+          type: array
+          items:
+            type: object
+            properties:
+              eventType:
+                type: string
+                enum: [compliance_check_completed, sanctions_screening_completed, stage_transition, deal_created, deal_settled, deal_failed, fincen_determination, fincen_filing, agent_registered, legal_check_completed, brokerage_check_completed, lending_prequalification_completed]
+              resultSummary: { type: object, nullable: true }
+              createdAt: { type: string, format: date-time }
+        onChainRecords:
+          type: object
+          properties:
+            complianceTxHash: { type: string, nullable: true }
+            deedTxHash: { type: string, nullable: true }
+            escrowTxHash: { type: string, nullable: true }
+            settlementTxHash: { type: string, nullable: true }
+        stagesAudited:
+          type: array
+          items: { type: string }
+        status:
+          type: string
+          enum: [complete, in_progress, not_found]
+
+    # --- KYC Schemas ---
+
+    KYCParty:
+      type: object
+      required: [partyId, role, entityType]
+      properties:
+        partyId: { type: string }
+        role: { type: string, enum: [buyer, seller, beneficial_owner, signer, guarantor, trustee] }
+        entityType: { type: string, enum: [individual, llc, corporation, trust, partnership, other] }
+        firstName: { type: string }
+        lastName: { type: string }
+        middleName: { type: string }
+        dateOfBirth: { type: string }
+        address:
+          type: object
+          properties:
+            street: { type: string }
+            city: { type: string }
+            state: { type: string }
+            zipCode: { type: string }
+            country: { type: string }
+        idDocument:
+          type: object
+          properties:
+            type: { type: string, enum: [ssn, itin, ein, passport, state_id, drivers_license] }
+            number: { type: string }
+            issuingJurisdiction: { type: string }
+            expirationDate: { type: string }
+        secondaryIdDocument:
+          type: object
+          properties:
+            type: { type: string, enum: [ssn, itin, ein, passport, state_id, drivers_license] }
+            number: { type: string }
+            issuingJurisdiction: { type: string }
+            expirationDate: { type: string }
+        entityName: { type: string }
+        formationState: { type: string }
+        ein: { type: string }
+        sourceOfFunds: { type: string }
+        sourceOfWealth: { type: string }
+        isForeign: { type: boolean }
+        foreignJurisdiction: { type: string }
+        isPEP: { type: boolean }
+        hasPEPAssociation: { type: boolean }
+        hasAdverseMedia: { type: boolean }
+        ownershipLayers: { type: integer }
+        beneficialOwners:
+          type: array
+          items:
+            type: object
+            properties:
+              ownerId: { type: string }
+              firstName: { type: string }
+              lastName: { type: string }
+              ownershipPercentage: { type: number }
+              isControlPerson: { type: boolean }
+              isTrustee: { type: boolean }
+              isGrantor: { type: boolean }
+              sourceOfFunds: { type: string }
+              isForeign: { type: boolean }
+              identityComplete: { type: boolean }
+              circularOwnership: { type: boolean }
+        sanctionsCleared: { type: boolean }
+        sanctionsNearMatch: { type: boolean }
+        hasPriorTransactions: { type: boolean }
+
+    KYCTransaction:
+      type: object
+      required: [purchasePrice, financingType, state, propertyType, isCashTransaction, isAllCash, hasUnusualPaymentStructure, rapidSuccessiveTransactions]
+      properties:
+        purchasePrice: { type: number }
+        financingType: { type: string, enum: [cash, conventional, fha, va, commercial, seller_financed] }
+        state: { type: string, minLength: 2, maxLength: 2 }
+        propertyType: { type: string, enum: [residential, commercial, mixed-use, land] }
+        isCashTransaction: { type: boolean }
+        isAllCash: { type: boolean }
+        hasUnusualPaymentStructure: { type: boolean }
+        rapidSuccessiveTransactions: { type: boolean }
+        priceToMarketVariance: { type: number }
+
+    KYCRiskAssessmentInput:
+      type: object
+      required: [state, transaction, parties]
+      properties:
+        dealId: { type: string }
+        state: { type: string, minLength: 2, maxLength: 2, description: 'Two-letter state code (auto-uppercased)' }
+        transaction:
+          $ref: '#/components/schemas/KYCTransaction'
+        parties:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/KYCParty'
+
+    KYCFullCheckInput:
+      type: object
+      required: [state, transaction, parties, checksToRun]
+      properties:
+        dealId: { type: string }
+        state: { type: string, minLength: 2, maxLength: 2 }
+        transaction:
+          $ref: '#/components/schemas/KYCTransaction'
+        parties:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/KYCParty'
+        checksToRun:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [risk_assessment, cdd_determination, identity_completeness, bo_validation, document_requirements, credential_readiness]
+        existingCredentials:
+          type: array
+          items: { type: string }
+
+    KYCRiskAssessmentResult:
+      type: object
+      properties:
+        dealId: { type: string }
+        timestamp: { type: string, format: date-time }
+        overallRiskLevel: { type: string, enum: [low, medium, high, critical] }
+        riskScore: { type: number }
+        factors:
+          type: array
+          items:
+            type: object
+            properties:
+              factor: { type: string }
+              weight: { type: number }
+              triggered: { type: boolean }
+              details: { type: string }
+        cddLevel: { type: string, enum: [simplified, standard, enhanced] }
+        recommendations:
+          type: array
+          items: { type: string }
+
+    # --- FIRPTA Schemas ---
+
+    FIRPTADeterminationInput:
+      type: object
+      required: [state, purchasePrice, sellerIsForeign, sellerType, buyerType, propertyUseIntent, propertyType]
+      properties:
+        dealId: { type: string }
+        state: { type: string, minLength: 2, maxLength: 2 }
+        purchasePrice: { type: number, exclusiveMinimum: 0 }
+        closingDate: { type: string, format: date }
+        sellerIsForeign: { type: boolean }
+        sellerType:
+          type: string
+          enum: [individual_foreign, individual_domestic, foreign_corporation, domestic_corporation, foreign_partnership, domestic_partnership, foreign_trust, domestic_trust, foreign_estate, qie_domestically_controlled, qie_not_domestically_controlled]
+        hasNonForeignAffidavit: { type: boolean }
+        hasWithholdingCertificate: { type: boolean }
+        estimatedGain: { type: number }
+        buyerType:
+          type: string
+          enum: [individual, corporation, partnership, trust, other_entity]
+        propertyUseIntent:
+          type: string
+          enum: [primary_residence, investment, rental, development, mixed_use, unknown]
+        propertyType: { type: string }
+        is1031Exchange: { type: boolean }
+        is1031Simultaneous: { type: boolean }
+        isQIE: { type: boolean }
+        isDomesticallyControlledQIE: { type: boolean }
+        isPubliclyTradedStock: { type: boolean }
+        isUSRPI: { type: boolean }
+
+    FIRPTACalculationInput:
+      allOf:
+        - $ref: '#/components/schemas/FIRPTADeterminationInput'
+        - type: object
+          properties:
+            propertyAddress: { type: string }
+            sellerName: { type: string }
+            sellerAddress: { type: string }
+            sellerTIN: { type: string }
+            buyerTIN: { type: string }
+            county: { type: string }
+            municipality: { type: string }
+
+    FIRPTADeterminationResult:
+      type: object
+      properties:
+        dealId: { type: string }
+        withholdingRequired: { type: boolean }
+        federalWithholdingRate: { type: number }
+        federalWithholdingAmount: { type: number }
+        exemptions:
+          type: array
+          items:
+            type: object
+            properties:
+              exemption: { type: string }
+              applicable: { type: boolean }
+              reason: { type: string }
+        tier: { type: string }
+        recommendations:
+          type: array
+          items: { type: string }
+
+    # --- ERC-3643 Schemas ---
+
+    ClaimIssuanceInput:
+      type: object
+      required: [identityAddress, dealId]
+      properties:
+        identityAddress: { type: string, pattern: '^0x[a-fA-F0-9]{40}$', description: ONCHAINID identity contract address }
+        dealId: { type: string }
+        topics:
+          type: array
+          items: { type: integer }
+          description: 'Claim topic codes to issue (defaults to all applicable)'
+
+    ClaimVerifyInput:
+      type: object
+      required: [identityAddress, topic, data, signature]
+      properties:
+        identityAddress: { type: string, pattern: '^0x[a-fA-F0-9]{40}$' }
+        topic: { type: integer }
+        data: { type: string, description: Hex-encoded claim data }
+        signature: { type: string, description: Hex-encoded EIP-712 signature }
+
+    ClaimIssuanceResult:
+      type: object
+      properties:
+        identityAddress: { type: string }
+        dealId: { type: string }
+        claims:
+          type: array
+          items:
+            type: object
+            properties:
+              topic: { type: integer }
+              scheme: { type: integer }
+              issuer: { type: string }
+              signature: { type: string }
+              data: { type: string }
+              uri: { type: string }
+        issuedAt: { type: string, format: date-time }
+
+    # --- Attestation Schemas ---
+
+    AttestationExplorerInput:
+      type: object
+      description: At least one of propertyAddress, city, or dealId is required.
+      properties:
+        propertyAddress: { type: string }
+        city: { type: string }
+        state: { type: string, minLength: 2, maxLength: 2 }
+        dealId: { type: string }
+
+    # --- Onboarding Schemas ---
+
+    PartnerContact:
+      type: object
+      required: [name, email, phone]
+      properties:
+        name: { type: string }
+        title: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+
+    TitleOnboardingInput:
+      type: object
+      required: [inviteToken, legalName, ein, stateOfIncorporation, addressStreet, addressCity, addressState, addressZip, activeStates, transactionTypes, handlesAllCash, handlesForeignBuyer, escrowAccounts, complianceOfficer]
+      properties:
+        inviteToken: { type: string }
+        legalName: { type: string }
+        dba: { type: string }
+        ein: { type: string, pattern: '^\d{2}-\d{7}$' }
+        stateOfIncorporation: { type: string, minLength: 2, maxLength: 2 }
+        addressStreet: { type: string }
+        addressCity: { type: string }
+        addressState: { type: string }
+        addressZip: { type: string, pattern: '^\d{5}(-\d{4})?$' }
+        activeStates:
+          type: array
+          minItems: 1
+          items: { type: string, minLength: 2, maxLength: 2 }
+        transactionTypes:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [residential, commercial] }
+        handlesAllCash: { type: boolean }
+        handlesForeignBuyer: { type: boolean }
+        escrowAccounts:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [bankName, accountState, isIOLTA]
+            properties:
+              bankName: { type: string }
+              accountState: { type: string }
+              isIOLTA: { type: boolean }
+        complianceOfficer:
+          $ref: '#/components/schemas/PartnerContact'
+        fincenConfig:
+          type: object
+          properties:
+            reportingPersonType: { type: string, enum: [title_insurance_company, title_insurance_agent, settlement_agent, attorney, other] }
+            transmitterControlCode: { type: string }
+        fincenAuthorizedSigner:
+          $ref: '#/components/schemas/PartnerContact'
+        technicalContact:
+          $ref: '#/components/schemas/PartnerContact'
+        productionSoftware: { type: string }
+        monthlyVolume: { type: string }
+        currentSanctionsProcess: { type: string }
+        currentFincenProcess: { type: string }
+        integrationPreference: { type: string, enum: [api, batch_csv, manual] }
+        titleUnderwriters:
+          type: array
+          items: { type: string }
+
+    LendingOnboardingInput:
+      type: object
+      required: [inviteToken, legalName, ein, stateOfIncorporation, addressStreet, addressCity, addressState, addressZip, activeStates, loanTypes, nmlsId, stateMortgageLicenses, complianceOfficer]
+      properties:
+        inviteToken: { type: string }
+        legalName: { type: string }
+        dba: { type: string }
+        ein: { type: string, pattern: '^\d{2}-\d{7}$' }
+        stateOfIncorporation: { type: string, minLength: 2, maxLength: 2 }
+        addressStreet: { type: string }
+        addressCity: { type: string }
+        addressState: { type: string }
+        addressZip: { type: string, pattern: '^\d{5}(-\d{4})?$' }
+        activeStates:
+          type: array
+          minItems: 1
+          items: { type: string, minLength: 2, maxLength: 2 }
+        loanTypes:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [conventional, fha, va, usda, jumbo] }
+        nmlsId: { type: string, pattern: '^\d{5,12}$' }
+        stateMortgageLicenses:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [state, licenseNumber]
+            properties:
+              state: { type: string }
+              licenseNumber: { type: string }
+        complianceOfficer:
+          $ref: '#/components/schemas/PartnerContact'
+        eAndOInsurance:
+          type: object
+          properties:
+            carrier: { type: string }
+            policyNumber: { type: string }
+            expirationDate: { type: string, format: date }
+        fhaLenderId: { type: string }
+        vaLenderId: { type: string }
+        warehouseLender: { type: string }
+        technicalContact:
+          $ref: '#/components/schemas/PartnerContact'
+        productionSoftware: { type: string }
+        monthlyVolume: { type: string }
+        currentSanctionsProcess: { type: string }
+        integrationPreference: { type: string, enum: [api, batch_csv, manual] }
+
+    BrokerageOnboardingInput:
+      type: object
+      required: [inviteToken, legalName, ein, stateOfIncorporation, addressStreet, addressCity, addressState, addressZip, activeStates, transactionTypes, stateBrokerLicenses, brokerageModel, complianceOfficer]
+      properties:
+        inviteToken: { type: string }
+        legalName: { type: string }
+        dba: { type: string }
+        ein: { type: string, pattern: '^\d{2}-\d{7}$' }
+        stateOfIncorporation: { type: string, minLength: 2, maxLength: 2 }
+        addressStreet: { type: string }
+        addressCity: { type: string }
+        addressState: { type: string }
+        addressZip: { type: string, pattern: '^\d{5}(-\d{4})?$' }
+        activeStates:
+          type: array
+          minItems: 1
+          items: { type: string, minLength: 2, maxLength: 2 }
+        transactionTypes:
+          type: array
+          minItems: 1
+          items: { type: string, enum: [residential, commercial] }
+        stateBrokerLicenses:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [state, licenseNumber, type]
+            properties:
+              state: { type: string }
+              licenseNumber: { type: string }
+              type: { type: string, enum: [broker, salesperson] }
+        brokerageModel: { type: string, enum: [traditional, discount, flat_fee] }
+        complianceOfficer:
+          $ref: '#/components/schemas/PartnerContact'
+        mlsIds:
+          type: array
+          items:
+            type: object
+            properties:
+              mlsName: { type: string }
+              memberId: { type: string }
+        narMemberId: { type: string }
+        eAndOInsurance:
+          type: object
+          properties:
+            carrier: { type: string }
+            policyNumber: { type: string }
+            expirationDate: { type: string, format: date }
+        technicalContact:
+          $ref: '#/components/schemas/PartnerContact'
+        productionSoftware: { type: string }
+        monthlyVolume: { type: string }
+        currentSanctionsProcess: { type: string }
+        integrationPreference: { type: string, enum: [api, batch_csv, manual] }
+
+    OnboardingResult:
+      type: object
+      properties:
+        partnerId: { type: string }
+        status: { type: string, enum: [pending_review, approved, rejected] }
+        vertical: { type: string, enum: [title, lending, brokerage] }
+        legalName: { type: string }
+        submittedAt: { type: string, format: date-time }

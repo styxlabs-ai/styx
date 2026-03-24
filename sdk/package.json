@@ -1,0 +1,35 @@
+{
+  "name": "@styx/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the Styx Compliance API — x402 micropayments for real estate compliance",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@x402/core": "^0.1.0",
+    "@x402/evm": "^0.1.0",
+    "viem": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/styxlabs-ai/styx.git",
+    "directory": "sdk"
+  },
+  "keywords": [
+    "styx",
+    "compliance",
+    "real-estate",
+    "x402",
+    "usdc",
+    "tokenization",
+    "erc-3643"
+  ]
+}
